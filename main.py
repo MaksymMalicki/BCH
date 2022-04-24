@@ -57,6 +57,7 @@ def findMinimalPolynomialForAlgebraicElement(algebraicElementDegree, baseDegree,
          result = np.absolute(np.append(np.array([1]), np.linalg.solve(A, b)))
     except:
         result = np.absolute(np.append(np.array([1]), np.linalg.lstsq(A, b, rcond=None)[0]))
+    result = np.floor([x%2 for x in result])
     return result
 
 def findGeneratorPolynomial(baseDegree, primPoly, t):
@@ -66,22 +67,29 @@ def findGeneratorPolynomial(baseDegree, primPoly, t):
     generatorPolynomial = np.mod(generatorPolynomial, 2)
     return generatorPolynomial
 
-def getMessage(message):
+def getMessage(message, k):
     result = []
     for letter in [char for char in message]:
         for byte in (format(ord(letter), '08b')):
             result.append(int(byte))
+    for x in range(k-len(result)):
+        result.append(0)
     return result
 
 def getEncodedMessage(message, n,k,genPoly):
+    print(len(message), ''.join([str(x) for x in message]))
     shiftVector = [0]*(n-k)
     shiftVector[0] = 1
     shiftedMessage = np.polymul(message, shiftVector)
+    print(len(shiftedMessage), ''.join([str(x) for x in shiftedMessage]))
     remainder = np.polydiv(shiftedMessage, genPoly)[1]
-    encodedMessage = [int(x%2) for x in np.absolute(np.append(shiftedMessage, remainder))]
+    print('reszta: ', len(remainder))
+    encodedMessage = [int(x%2) for x in np.polyadd(np.absolute(shiftedMessage), np.absolute(remainder))]
     test = ''.join([str(x) for x in encodedMessage])
-    print(test)
+    print('result: ', len(test), test)
 
-message = getMessage('abcd')
-genPoly = findGeneratorPolynomial(4, [1, 0, 0, 1, 1], 2)
+message = getMessage('abcd', 179)
+print(''.join([str(x) for x in message]))
+genPoly = findGeneratorPolynomial(8, [1,0,0,0,1,1,1,0,1], 10)
+print('genPoly: ', genPoly)
 getEncodedMessage(message, 255, 179, genPoly)
