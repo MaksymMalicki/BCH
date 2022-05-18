@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 
 
@@ -62,7 +64,7 @@ def findGeneratorPolynomial(baseDegree, t, algebraicElementsTable):
     # our simulation of LCM
     uniqueMinimalPolynomials = {array.tobytes(): array for array in minimalPolynomials}.values()
     for minimalPolynomial in uniqueMinimalPolynomials:
-        generatorPolynomial = np.rint([x%2 for x in np.polymul(generatorPolynomial, minimalPolynomial)])
+        generatorPolynomial = np.rint([x % 2 for x in np.polymul(generatorPolynomial, minimalPolynomial)])
     return generatorPolynomial
 
 
@@ -90,21 +92,65 @@ def getEncodedMessage(message, n, k, genPoly):
 
 
 ### DECODING
-
 def corruptMessage(message, errorsNumber):
+    for x in range(errorsNumber):
+        message[random.randint(0, len(message) - 1)] = 1 if message[random.randint(0, len(message) - 1)] else 0
+
+
+def getSyndrome(message, genPoly):
+    return np.mod(np.polydiv(message, genPoly)[1], 2)
+
+
+def getHammingWeight(syndrome):
+    return np.count_nonzero(syndrome == 1)
+
+def add_GF2(arr1, arr2):
+    if len(arr1) > len(arr2):
+        arr2 = np.pad(arr2, (len(arr1) - len(arr2), 0), "constant")
+    else:
+        arr1 = np.pad(arr1, (len(arr2) - len(arr1), 0), "constant")
+    return np.array([1 if x else 0 for x in np.logical_xor(arr1, arr2)])
+
+def multiply_GF2(arr1, arr2):
     return
 
+def decode(corruptedMessage, genPoly, t):
+    syndrome = getSyndrome(corruptedMessage, genPoly)
+    print("syndrome", syndrome)
+    # sprawdzenie czy wszystkie elementy to zero
+    if not np.any(syndrome):
+        print("Nie ma bledow")
+    else:
+        if getHammingWeight(syndrome) <= t:
+            add_GF2(corruptedMessage, syndrome)
+        else:
+            rollsCount = 0
+            print("message b4 rolling: ", corruptedMessage)
+            while True:
+                corruptedMessage = np.roll(corruptedMessage, 1)
+                print(f"roll: ${rollsCount}, message: {corruptedMessage}, syndrome: {syndrome}, hamming weight: {getHammingWeight(syndrome)}")
+                rollsCount += 1
+                syndrome = getSyndrome(corruptedMessage, genPoly)
+                if getHammingWeight(syndrome) <= t:
+                    break
+            print(syndrome, corruptedMessage)
+            correctMessage = add_GF2(corruptedMessage, syndrome)
+            for x in range(rollsCount):
+                correctMessage = np.roll(correctMessage, -1)
+            print(correctMessage)
 
-def calculateSyndrome(message):
-    return
+
+# message = getMessage('abcd', 255)
+# print(''.join([str(x) for x in message]))
+# # algebraicElementsTable = findAlgebraicElementsTable(4, [1, 0, 0, 1, 1])
+# # genPoly = findGeneratorPolynomial(4, 3, algebraicElementsTable)
+# algebraicElementsTable = findAlgebraicElementsTable(8, [1, 0, 0, 0, 1, 1, 1, 0, 1])
+# genPoly = findGeneratorPolynomial(8, 10, algebraicElementsTable)
+# print('genPoly: ', genPoly)
+#
+# # getEncodedMessage(message, 255, 179, genPoly)
 
 
-message = getMessage('abcd', 255)
-print(''.join([str(x) for x in message]))
-#algebraicElementsTable = findAlgebraicElementsTable(4, [1, 0, 0, 1, 1])
-#genPoly = findGeneratorPolynomial(4, 3, algebraicElementsTable)
-algebraicElementsTable = findAlgebraicElementsTable(8, [1, 0, 0, 0, 1, 1, 1, 0, 1])
-genPoly = findGeneratorPolynomial(8, 10, algebraicElementsTable)
-print('genPoly: ', genPoly)
+decode(np.array([1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0]), np.array([1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1]), 2)
 
-# getEncodedMessage(message, 255, 179, genPoly)
+
