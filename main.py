@@ -1,10 +1,11 @@
+import math
 import random
-
 import numpy as np
+from timeit import default_timer as timer
+import copy
 
 
 ### GENERATOR POLYNOMIAL
-
 def findMinimalPolynomialDegree(i, p, q):
     # znajdujemy stopien wielomianu minimalnego dla danego elementu algebraicznego
     # korzystajac z wzoru z ksiazki dr. Mochnackiego
@@ -43,16 +44,16 @@ def findMinimalPolynomialForAlgebraicElement(algebraicElementDegree, baseDegree,
     b = vectorCoefficients[0]
     A = np.transpose(vectorCoefficients[1:])
     try:
-        result = np.rint(np.absolute(np.append(np.array([1]), np.linalg.solve(A, b))))
+        result = np.absolute(np.append(np.array([1]), np.linalg.solve(A, b)))
+        print('solve')
     except:
+        print("lstq")
         result = np.rint(np.absolute(np.append(np.array([1]), np.linalg.lstsq(A, b, rcond=None)[0])))
-    result1 = np.ceil([x % 2 for x in result])
-    result2 = np.floor([x % 2 for x in result])
-    result3 = np.rint([x % 2 for x in result])
-    print(f"result for {algebraicElementDegree}, ceil: ", result1)
-    print(f"result for {algebraicElementDegree}, floor:", result2)
-    print(f"result for {algebraicElementDegree}, rint: ", result3)
-    return result3
+    print(f"{algebraicElementDegree} equasion result: ", result)
+    result = np.array([math.floor(x * 10) % 2 if x < 1 else x % 2 for x in result])
+    print(f"{algebraicElementDegree} after modulo: ", result)
+    print()
+    return result
 
 
 def findGeneratorPolynomial(baseDegree, t, algebraicElementsTable):
@@ -64,93 +65,386 @@ def findGeneratorPolynomial(baseDegree, t, algebraicElementsTable):
     # our simulation of LCM
     uniqueMinimalPolynomials = {array.tobytes(): array for array in minimalPolynomials}.values()
     for minimalPolynomial in uniqueMinimalPolynomials:
-        generatorPolynomial = np.rint([x % 2 for x in np.polymul(generatorPolynomial, minimalPolynomial)])
+        generatorPolynomial = np.array([x % 2 for x in np.absolute(np.polymul(generatorPolynomial, minimalPolynomial))])
     return generatorPolynomial
 
 
 #### ENCODING
 
-def getMessage(message, k):
+def getMessage(message):
     result = []
     for letter in [char for char in message]:
         for byte in (format(ord(letter), '08b')):
             result.append(int(byte))
-    for x in range(k - len(result)):
-        result.append(0)
     return result
 
 
-def getEncodedMessage(message, n, k, genPoly):
-    # shift to left
-    shiftedMessage = np.roll(message, n - k + 1)
-    print(len(shiftedMessage), ''.join([str(x) for x in shiftedMessage]))
-    remainder = np.mod(np.polydiv(shiftedMessage, genPoly)[1], 2)
-    print('reszta: ', len(remainder), remainder)
-    encodedMessage = [int(x % 2) for x in np.polyadd(np.absolute(shiftedMessage), np.absolute(remainder))]
-    test = ''.join([str(x) for x in encodedMessage])
-    print('result: ', len(test), test)
+def getRandomMessage(k):
+    result = []
+    for x in range(k):
+        result.append(random.randint(0, 1))
+    return result
+
+
+def getEncodedMessage(message, n, genPoly):
+    for x in range(n - len(message)):
+        message.append(0)
+    remainder = np.mod(np.polydiv(message, genPoly)[1], 2)
+    encodedMessage = [int(x % 2) for x in np.polyadd(np.absolute(message), np.absolute(remainder))]
+    return encodedMessage
 
 
 ### DECODING
-def corruptMessage(message, errorsNumber):
-    for x in range(errorsNumber):
-        message[random.randint(0, len(message) - 1)] = 1 if message[random.randint(0, len(message) - 1)] else 0
+def corruptMessageRandom(encodedMessage, errorsNumber):
+    errors = []
+    message = copy.deepcopy(encodedMessage)
+    while (len(errors) != errorsNumber):
+        errorIndex = random.randint(0, len(message) - 1)
+        if errorIndex not in errors:
+            errors.append(errorIndex)
+            message[errorIndex] = 1 if message[errorIndex] == 0 else 0
+    return np.array(message)
+
+
+def corruptMessageTripleErrorsMinInterval(encodedMessage, minInterval=30):
+    message = copy.deepcopy(encodedMessage)
+    errors = []
+    for x in range(3):
+        if x == 0:
+            currentError = random.randint(0, len(message) - 1)
+            errors.append(currentError)
+            message[currentError] = 1 if message[currentError] == 0 else 0
+        elif x == 1:
+            if (errors[0] + minInterval) % 255 > errors[0]:
+                errors.append(random.randint(errors[0] + 2, (errors[0] + minInterval)))
+            else:
+                errors.append(random.randint(errors[0] + 2, (errors[0] + minInterval)) % 255)
+            message[errors[1]] = 1 if message[errors[1]] == 0 else 0
+        elif x == 2:
+            if errors[0] > errors[1]:
+                thirdError = random.randint(errors[0], 255 + errors[1]) % 255
+                while thirdError in errors:
+                    thirdError = random.randint(errors[0], 255 + errors[1]) % 255
+            else:
+                thirdError = random.randint(errors[0], errors[1])
+                while thirdError in errors:
+                    thirdError = random.randint(errors[0], errors[1])
+            errors.append(thirdError)
+            message[errors[2]] = 1 if message[errors[2]] == 0 else 0
+    print(errors, abs(errors[0] - errors[1]))
+    return np.array(message)
+
+
+def corruptMessageTripleErrorsMaxInterval(encodedMessage, maxInterval=100):
+    message = copy.deepcopy(encodedMessage)
+    errors = []
+    for x in range(3):
+        if x == 0:
+            currentError = random.randint(0, len(message) - 1)
+            errors.append(currentError)
+            message[currentError] = 1 if message[currentError] == 0 else 0
+        if x == 1:
+            while len(errors) < 2:
+                currentError = random.randint(errors[0] + maxInterval, errors[0] + maxInterval + 55) % 255
+                if currentError not in errors:
+                    errors.append(currentError)
+                    message[currentError] = 1 if message[currentError] == 0 else 0
+        if x == 2:
+            currentError = random.randint(0, len(message) - 1)
+            while currentError in errors:
+                currentError = random.randint(0, len(message) - 1)
+            errors.append(currentError)
+            message[currentError] = 1 if message[currentError] == 0 else 0
+    print(errors, abs(errors[0] - errors[1]))
+    return np.array(message)
+
+
+def corruptMessageSingleError(message):
+    currentError = random.randint(0, len(message) - 1)
+    message[currentError] = 1 if message[currentError] == 0 else 0
+    return message
 
 
 def getSyndrome(message, genPoly):
-    return np.mod(np.polydiv(message, genPoly)[1], 2)
+    return np.array([x % 2 for x in np.absolute(np.polydiv(message, genPoly)[1])])
 
 
 def getHammingWeight(syndrome):
     return np.count_nonzero(syndrome == 1)
 
-def add_GF2(arr1, arr2):
-    if len(arr1) > len(arr2):
-        arr2 = np.pad(arr2, (len(arr1) - len(arr2), 0), "constant")
-    else:
-        arr1 = np.pad(arr1, (len(arr2) - len(arr1), 0), "constant")
-    return np.array([1 if x else 0 for x in np.logical_xor(arr1, arr2)])
 
-def multiply_GF2(arr1, arr2):
-    return
-
-def decode(corruptedMessage, genPoly, t):
+def decode(corruptedMessage, genPoly, t, k):
     syndrome = getSyndrome(corruptedMessage, genPoly)
-    print("syndrome", syndrome)
-    # sprawdzenie czy wszystkie elementy to zero
     if not np.any(syndrome):
-        print("Nie ma bledow")
+        print("Nie ma bledow wykrywalnych przez kod")
+        return corruptedMessage, 0
     else:
         if getHammingWeight(syndrome) <= t:
-            add_GF2(corruptedMessage, syndrome)
+            correctMessage = np.array([int(x % 2) for x in np.polyadd(corruptedMessage, syndrome)])
+            print("Bledy w czesci kontrolnej, giga ez")
+            return correctMessage, 1
         else:
+            print("Bledy w czesci informacyjnej, trzeba shiftowac")
             rollsCount = 0
-            print("message b4 rolling: ", corruptedMessage)
             while True:
                 corruptedMessage = np.roll(corruptedMessage, 1)
-                print(f"roll: ${rollsCount}, message: {corruptedMessage}, syndrome: {syndrome}, hamming weight: {getHammingWeight(syndrome)}")
                 rollsCount += 1
                 syndrome = getSyndrome(corruptedMessage, genPoly)
-                if getHammingWeight(syndrome) <= t:
+                if getHammingWeight(syndrome) <= t or rollsCount >= 255:
+                    print(f"roll: ${rollsCount}, hamming weight: {getHammingWeight(syndrome)}, t: {t}")
                     break
-            print(syndrome, corruptedMessage)
-            correctMessage = add_GF2(corruptedMessage, syndrome)
+            if rollsCount >= 255:
+                print("Bledy niepoprawialne")
+                return corruptedMessage, 0
+            print("sukces suko")
+            # print("syndrome", syndrome)
+            # print("shifted message: ", corruptedMessage)
+            correctMessage = np.array([int(x % 2) for x in np.polyadd(corruptedMessage, syndrome)])
             for x in range(rollsCount):
                 correctMessage = np.roll(correctMessage, -1)
-            print(correctMessage)
+            return correctMessage, 1
 
 
-# message = getMessage('abcd', 255)
-# print(''.join([str(x) for x in message]))
-# # algebraicElementsTable = findAlgebraicElementsTable(4, [1, 0, 0, 1, 1])
-# # genPoly = findGeneratorPolynomial(4, 3, algebraicElementsTable)
-# algebraicElementsTable = findAlgebraicElementsTable(8, [1, 0, 0, 0, 1, 1, 1, 0, 1])
-# genPoly = findGeneratorPolynomial(8, 10, algebraicElementsTable)
-# print('genPoly: ', genPoly)
-#
-# # getEncodedMessage(message, 255, 179, genPoly)
+def monteCarloTestUnit(showPrints=False):
+    BCHconfig = [
+        [247, 1, [1, 0, 0, 0, 1, 1, 1, 0, 1]],
+        [239, 2, [1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1]],
+        [231, 3, [1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1]],
+        [223, 4, [1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1]],
+        [215, 5,
+         [1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1,
+          0, 0, 0, 1]],
+        [207, 6,
+         [1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1,
+          1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1]],
+        [199, 7,
+         [1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0,
+          0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1]],
+        [191, 8,
+         [1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0,
+          1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1]],
+        [187, 9,
+         [1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1]],
+        [179, 10,
+         [1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0,
+          0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1,
+          1, 0, 1]],
+        [171, 11,
+         [1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0,
+          0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0,
+          0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1]],
+        [163, 12,
+         [1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1,
+          0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0,
+          0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1]],
+        [155, 13,
+         [1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1,
+          1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0,
+          1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1]],
+        [147, 14,
+         [1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1,
+          0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0,
+          1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1]],
+        [139, 15,
+         [1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0,
+          0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1,
+          1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0,
+          1, 0, 0, 1, 0, 1]],
+        [131, 18,
+         [1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0,
+          1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+          1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1,
+          1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1]],
+        [123, 19,
+         [1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0,
+          1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0,
+          1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 1,
+          1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1]],
+        [115, 21,
+         [1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0,
+          0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0,
+          0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1,
+          1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1]],
+        [107, 22,
+         [1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1,
+          0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0,
+          0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1,
+          1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0,
+          1]],
+        [99, 23,
+         [1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1,
+          0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1,
+          1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1,
+          0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1,
+          1, 0, 0, 0, 1, 1, 0, 0, 1]],
+        [91, 25,
+         [1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1,
+          1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0,
+          1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1,
+          1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0,
+          1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1]],
+        [87, 26,
+         [1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1,
+          1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0,
+          1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0,
+          0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1,
+          0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1]],
+        [79, 27,
+         [1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1,
+          0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0,
+          0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0,
+          0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1,
+          1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1]],
+        [71, 29,
+         [1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0,
+          0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1,
+          0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1,
+          0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1,
+          1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0,
+          1]],
+        [63, 30,
+         [1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0,
+          0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1,
+          1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1,
+          0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1,
+          1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0,
+          1, 1, 0, 0, 0, 0, 0, 1]],
+        [55, 31,
+         [1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0,
+          0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0,
+          1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1,
+          1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1,
+          0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0,
+          0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1]],
+        [47, 42,
+         [1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1,
+          0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1,
+          0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0,
+          0, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0,
+          0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1,
+          1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1]],
+        [45, 43,
+         [1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1,
+          1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1,
+          1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1,
+          1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0,
+          0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0,
+          0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1]],
+        [37, 45,
+         [1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1,
+          1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1,
+          1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0,
+          1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1,
+          0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1,
+          1, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]],
+        [29, 47,
+         [1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1,
+          1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0,
+          0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0,
+          1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+          1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0,
+          1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0,
+          1, 1, 1, 1, 1]],
+        [21, 55,
+         [1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0,
+          0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0,
+          0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1,
+          0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0,
+          1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0,
+          1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1,
+          1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1]],
+        [13, 59,
+         [1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0,
+          1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1,
+          1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+          0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1,
+          0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1,
+          0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0,
+          0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1]],
+        [9, 63,
+         [1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1,
+          0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0,
+          1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0,
+          0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0,
+          0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0,
+          0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1,
+          0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1]],
+    ]
+    randomConfig = BCHconfig[random.randint(0, len(BCHconfig) - 1)]
+    # print("config: ", randomConfig)
+    correctionAbility = randomConfig[1]
+    genPoly = randomConfig[2]
+    # algebraicElementsTable = findAlgebraicElementsTable(8, [1, 0, 0, 1, 1])
+    # genPoly = findGeneratorPolynomial(8, correctionAbility, algebraicElementsTable)
+    message = getRandomMessage(179)
+    start = timer()
+    encodedMessage = getEncodedMessage(message, 255, genPoly)
+    encodeTime = timer() - start
+    errorsNumber = random.randint(1, randomConfig[1])
+    corruptedMessage = corruptMessageRandom(encodedMessage, errorsNumber)
+    start = timer()
+    decodedMessage, result = decode(corruptedMessage, genPoly, correctionAbility, randomConfig[0])
+    decodeTime = timer() - start
+    uncorrectedErrors = np.count_nonzero(encodedMessage != decodedMessage)
+    if showPrints:
+        print('encoded message:   ', ''.join([str(x) for x in encodedMessage]))
+        print('corrupted message: ', ''.join([str(x) for x in corruptedMessage]))
+        print('decoded message:   ', ''.join([str(x) for x in decodedMessage]))
+        print("generated errors: ", errorsNumber, "uncorrected errors: ", uncorrectedErrors)
+        print("encode time: ", encodeTime)
+        print("decode", decodeTime)
+        print("result: ", result)
+    return result, encodeTime, decodeTime
 
 
-decode(np.array([1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0]), np.array([1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1]), 2)
+def universalTestUnit(errorsNumber, showPrints=False):
+    BCHconfig = [179, 10,
+                 [1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1,
+                  1, 1, 0,
+                  0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+                  1, 0, 1,
+                  1, 0, 1]]
+    k = BCHconfig[0]
+    correctionAbility = BCHconfig[1]
+    genPoly = BCHconfig[2]
+    message = getRandomMessage(k)
+    start = timer()
+    encodedMessage = getEncodedMessage(message, 255, genPoly)
+    encodeTime = timer() - start
+    corruptedMessage = corruptMessageTripleErrorsMaxInterval(encodedMessage)
+    start = timer()
+    decodedMessage, result = decode(corruptedMessage, genPoly, correctionAbility, k)
+    decodeTime = timer() - start
+    uncorrectedErrors = np.count_nonzero(encodedMessage != decodedMessage)
+    if showPrints:
+        print('encoded message:   ', ''.join([str(x) for x in encodedMessage]))
+        print('corrupted message: ', ''.join([str(x) for x in corruptedMessage]))
+        print('decoded message:   ', ''.join([str(x) for x in decodedMessage]))
+        print("generated errors: ", errorsNumber, "uncorrected errors: ", uncorrectedErrors)
+        print("encode time: ", encodeTime)
+        print("decode", decodeTime)
+        print("result: ", result)
+    return result, encodeTime, decodeTime
 
 
+def runTests():
+    sample = 100
+    averageEncodeTime, averageDecodeTimeSuccess, averageDecodeTime, efficiency = 0, 0, 0, 0
+    for x in range(sample):
+        result, encodeTime, decodeTime = universalTestUnit(3)
+        averageEncodeTime += encodeTime
+        averageDecodeTime += decodeTime
+        averageDecodeTimeSuccess += decodeTime if result else 0
+        efficiency += result
+        print(x)
+    print("Average encode time: ", averageEncodeTime / sample)
+    print("Average decode time: ", averageDecodeTime / sample)
+    print("Efficiency [%]: ", efficiency * 100 / sample)
+    try:
+        print("Average successful decode time: ", averageDecodeTimeSuccess / efficiency)
+    except:
+        print("Average successful decode time: ", 0)
+
+
+runTests()
